@@ -94,41 +94,49 @@ async def start_chat(bid: str, websocket: WebSocket):
                             parts = data.split(b'\x0c')
                             messages = [part.decode('utf-8') for part in parts]
                             
-                            # 시청자 수 업데이트 메시지 처리
-                            if len(messages) > 5 and messages[1] == '0':
-                                viewer_count = int(messages[2])
-                                await websocket.send_json({
-                                    "type": "stats",
-                                    "data": {
-                                        "viewers": viewer_count
-                                    }
-                                })
-                            
-                            # 후원 메시지 처리
-                            elif len(messages) > 5 and messages[1].startswith('별풍선'):
-                                try:
-                                    amount = int(messages[1].split(' ')[1])
+                            # 채팅 메시지 처리 부분 수정
+                            if len(messages) > 5:
+                                # 시청자 수 업데이트 메시지
+                                if messages[1] == '0':
+                                    viewer_count = int(messages[2])
                                     await websocket.send_json({
-                                        "type": "chat",
-                                        "is_donation": True,
-                                        "nickname": messages[6],
-                                        "message": messages[1],
-                                        "amount": amount
+                                        "type": "stats",
+                                        "data": {
+                                            "viewers": viewer_count
+                                        }
                                     })
-                                except:
-                                    pass
-                            
-                            # 일반 채팅 메시지 처리
-                            elif len(messages) > 5 and not messages[1].startswith('fw='):
-                                if '|' not in messages[1]:  # 시스템 메시지 필터링
-                                    user_id, comment, user_nickname = messages[2], messages[1], messages[6]
-                                    await websocket.send_json({
-                                        "type": "chat",
-                                        "is_donation": False,
-                                        "nickname": user_nickname,
-                                        "message": comment
-                                    })
-                            
+                                
+                                # 후원 메시지
+                                elif '별풍선' in messages[1]:
+                                    try:
+                                        amount = int(''.join(filter(str.isdigit, messages[1])))
+                                        await websocket.send_json({
+                                            "type": "chat",
+                                            "is_donation": True,
+                                            "nickname": messages[6],
+                                            "message": messages[1],
+                                            "amount": amount
+                                        })
+                                    except:
+                                        pass
+                                
+                                # 일반 채팅 메시지
+                                elif not any(msg.startswith(('fw=', 'w=')) for msg in messages):
+                                    if len(messages) > 6 and messages[1] != '1':  # 시스템 메시지 필터링
+                                        nickname = messages[6]
+                                        message = messages[1]
+                                        
+                                        # 닉네임과 메시지가 : 으로 구분된 경우 처리
+                                        if ': ' in message:
+                                            message = message.split(': ', 1)[1]
+                                        
+                                        await websocket.send_json({
+                                            "type": "chat",
+                                            "is_donation": False,
+                                            "nickname": nickname,
+                                            "message": message
+                                        })
+
                             # 60초마다 ping 전송
                             if not hasattr(start_chat, 'last_ping') or \
                                time.time() - start_chat.last_ping > 30:
