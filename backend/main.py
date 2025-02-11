@@ -126,16 +126,36 @@ async def start_chat(bid: str, websocket: WebSocket):
                                         nickname = messages[6]
                                         message = messages[1]
                                         
-                                        # 닉네임과 메시지가 : 으로 구분된 경우 처리
-                                        if ': ' in message:
-                                            message = message.split(': ', 1)[1]
-                                        
-                                        await websocket.send_json({
-                                            "type": "chat",
-                                            "is_donation": False,
-                                            "nickname": nickname,
-                                            "message": message
-                                        })
+                                        # 시스템 메시지 필터링 (숫자|숫자 형태만 필터링)
+                                        if not ('|' in message and all(part.isdigit() for part in message.split('|'))):
+                                            # 후원 메시지 감지 (채팅으로 오는 후원 메시지)
+                                            if any(keyword in message for keyword in ['별풍선', '스타풍선', '받았습니다', '선물받았습니다']):
+                                                try:
+                                                    # 숫자 추출 시도
+                                                    amount = int(''.join(filter(str.isdigit, message)))
+                                                    await websocket.send_json({
+                                                        "type": "chat",
+                                                        "is_donation": True,
+                                                        "nickname": nickname,
+                                                        "message": message,
+                                                        "amount": amount
+                                                    })
+                                                except:
+                                                    # 숫자를 추출할 수 없으면 일반 메시지로 처리
+                                                    await websocket.send_json({
+                                                        "type": "chat",
+                                                        "is_donation": False,
+                                                        "nickname": nickname,
+                                                        "message": message
+                                                    })
+                                            else:
+                                                # 일반 채팅 메시지
+                                                await websocket.send_json({
+                                                    "type": "chat",
+                                                    "is_donation": False,
+                                                    "nickname": nickname,
+                                                    "message": message
+                                                })
 
                             # 60초마다 ping 전송
                             if not hasattr(start_chat, 'last_ping') or \
