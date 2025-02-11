@@ -21,7 +21,7 @@
 
         function startChat() {
             const bjId = document.getElementById('bj-id').value;
-            ws = new WebSocket('ws://your-domain.com/ws');
+            ws = new WebSocket('wss://soopchat.onrender.com/ws');
             
             ws.onopen = () => {
                 ws.send(`start:${bjId}`);
