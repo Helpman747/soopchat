@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>실시간 채팅</title>
+    <style>
+        #chat-box {
+            height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <input type="text" id="bj-id" placeholder="BJ 아이디">
+    <button onclick="startChat()">시작</button>
+    <div id="chat-box"></div>
+
+    <script>
+        let ws;
+
+        function startChat() {
+            const bjId = document.getElementById('bj-id').value;
+            ws = new WebSocket('ws://your-domain.com/ws');
+            
+            ws.onopen = () => {
+                ws.send(`start:${bjId}`);
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'chat') {
+                    addChat(data);
+                }
+            };
+        }
+
+        function addChat(chat) {
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML += `<p><strong>${chat.nickname}</strong>: ${chat.message}</p>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html> 
