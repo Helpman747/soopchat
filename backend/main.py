@@ -6,6 +6,7 @@ import ssl
 import certifi
 from backend.api import get_player_live
 import websockets
+import time
 
 app = FastAPI()
 
@@ -60,61 +61,48 @@ async def start_chat(bid: str, websocket: WebSocket):
         })
 
         ssl_context = create_ssl_context()
-        while True:  # 연결이 끊어지면 재연결 시도
+        while True:  # 메인 루프
             try:
                 async with websockets.connect(
                     f"wss://{CHDOMAIN}:{CHPT}/Websocket/{BJID}",
                     ssl=ssl_context,
                     subprotocols=['chat'],
-                    ping_interval=30,  # 30초마다 ping
-                    ping_timeout=10    # 10초 동안 응답 없으면 timeout
+                    ping_interval=30,
+                    ping_timeout=10
                 ) as ws:
-                    # 최초 연결시 전달하는 패킷
-                    CONNECT_PACKET = f'\x1b\t000100000600\x0c\x0c\x0c16\x0c'
-                    # 메세지를 내려받기 위해 보내는 패킷
-                    JOIN_PACKET = f'\x1b\t0002{len(CHATNO.encode("utf-8"))+6:06}00\x0c{CHATNO}\x0c\x0c\x0c\x0c\x0c'
-                    # 주기적으로 핑을 보내서 메세지를 계속 수신하는 패킷
-                    PING_PACKET = f'\x1b\t000000000100\x0c'
-
-                    await ws.send(CONNECT_PACKET)
+                    # 연결 패킷 전송
+                    await ws.send(f'\x1b\t000100000600\x0c\x0c\x0c16\x0c')
                     await asyncio.sleep(2)
-                    await ws.send(JOIN_PACKET)
+                    await ws.send(f'\x1b\t0002{len(CHATNO.encode("utf-8"))+6:06}00\x0c{CHATNO}\x0c\x0c\x0c\x0c\x0c')
 
-                    async def ping():
-                        while True:
-                            try:
-                                await asyncio.sleep(30)  # 30초마다
-                                await ws.send(PING_PACKET)
-                            except Exception as e:
-                                print(f"Ping error: {e}")
-                                return
+                    # 채팅 수신 루프
+                    while True:
+                        try:
+                            data = await ws.recv()
+                            parts = data.split(b'\x0c')
+                            messages = [part.decode('utf-8') for part in parts]
+                            if len(messages) > 5 and messages[1] not in ['-1', '1'] and '|' not in messages[1]:
+                                user_id, comment, user_nickname = messages[2], messages[1], messages[6]
+                                await websocket.send_json({
+                                    "type": "chat",
+                                    "nickname": user_nickname,
+                                    "message": comment
+                                })
+                            
+                            # 60초마다 ping 전송
+                            if not hasattr(start_chat, 'last_ping') or \
+                               time.time() - start_chat.last_ping > 30:
+                                await ws.send('\x1b\t000000000100\x0c')
+                                start_chat.last_ping = time.time()
 
-                    async def receive_messages():
-                        while True:
-                            try:
-                                data = await ws.recv()
-                                parts = data.split(b'\x0c')
-                                messages = [part.decode('utf-8') for part in parts]
-                                if len(messages) > 5 and messages[1] not in ['-1', '1'] and '|' not in messages[1]:
-                                    user_id, comment, user_nickname = messages[2], messages[1], messages[6]
-                                    await websocket.send_json({
-                                        "type": "chat",
-                                        "nickname": user_nickname,
-                                        "message": comment
-                                    })
-                            except Exception as e:
-                                print(f"Error processing message: {e}")
-                                return
-
-                    await asyncio.gather(
-                        receive_messages(),
-                        ping()
-                    )
+                        except Exception as e:
+                            print(f"Chat receive error: {e}")
+                            break  # 내부 루프만 종료하고 재연결 시도
 
             except Exception as e:
                 print(f"Connection error: {e}")
-                await asyncio.sleep(5)  # 5초 후 재연결 시도
-                continue
+                await asyncio.sleep(5)  # 5초 대기 후 재연결
+                continue  # 외부 루프로 돌아가서 재연결
 
     except Exception as e:
         await websocket.send_json({"error": str(e)})
