@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 import asyncio
 import ssl
 import certifi
-from api import get_player_live
+from backend.api import get_player_live
 
 app = FastAPI()
 
