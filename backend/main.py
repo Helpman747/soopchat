@@ -13,8 +13,8 @@ app = FastAPI()
 # 정적 파일 서비스 설정
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-# 연결된 웹소켓 클라이언트들
-clients = set()
+# 전역 변수로 현재 접속자 수 관리
+connected_clients = set()
 
 # SSL 컨텍스트 생성
 def create_ssl_context():
@@ -34,7 +34,14 @@ async def get():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    clients.add(websocket)
+    connected_clients.add(websocket)
+    
+    # 모든 클라이언트에게 현재 접속자 수 전송
+    await broadcast_message({
+        "type": "viewers",
+        "count": len(connected_clients)
+    })
+    
     try:
         while True:
             data = await websocket.receive_text()
@@ -42,7 +49,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 bid = data.split(":")[1]
                 await start_chat(bid, websocket)
     except:
-        clients.remove(websocket)
+        connected_clients.remove(websocket)
+        # 접속 종료시에도 접속자 수 업데이트
+        await broadcast_message({
+            "type": "viewers",
+            "count": len(connected_clients)
+        })
 
 async def start_chat(bid: str, websocket: WebSocket):
     try:
@@ -81,13 +93,41 @@ async def start_chat(bid: str, websocket: WebSocket):
                             data = await ws.recv()
                             parts = data.split(b'\x0c')
                             messages = [part.decode('utf-8') for part in parts]
-                            if len(messages) > 5 and messages[1] not in ['-1', '1'] and '|' not in messages[1]:
-                                user_id, comment, user_nickname = messages[2], messages[1], messages[6]
+                            
+                            # 시청자 수 업데이트 메시지 처리
+                            if len(messages) > 5 and messages[1] == '0':
+                                viewer_count = int(messages[2])
                                 await websocket.send_json({
-                                    "type": "chat",
-                                    "nickname": user_nickname,
-                                    "message": comment
+                                    "type": "stats",
+                                    "data": {
+                                        "viewers": viewer_count
+                                    }
                                 })
+                            
+                            # 후원 메시지 처리
+                            elif len(messages) > 5 and messages[1].startswith('별풍선'):
+                                try:
+                                    amount = int(messages[1].split(' ')[1])
+                                    await websocket.send_json({
+                                        "type": "chat",
+                                        "is_donation": True,
+                                        "nickname": messages[6],
+                                        "message": messages[1],
+                                        "amount": amount
+                                    })
+                                except:
+                                    pass
+                            
+                            # 일반 채팅 메시지 처리
+                            elif len(messages) > 5 and not messages[1].startswith('fw='):
+                                if '|' not in messages[1]:  # 시스템 메시지 필터링
+                                    user_id, comment, user_nickname = messages[2], messages[1], messages[6]
+                                    await websocket.send_json({
+                                        "type": "chat",
+                                        "is_donation": False,
+                                        "nickname": user_nickname,
+                                        "message": comment
+                                    })
                             
                             # 60초마다 ping 전송
                             if not hasattr(start_chat, 'last_ping') or \
@@ -97,20 +137,20 @@ async def start_chat(bid: str, websocket: WebSocket):
 
                         except Exception as e:
                             print(f"Chat receive error: {e}")
-                            break  # 내부 루프만 종료하고 재연결 시도
+                            break
 
             except Exception as e:
                 print(f"Connection error: {e}")
-                await asyncio.sleep(5)  # 5초 대기 후 재연결
-                continue  # 외부 루프로 돌아가서 재연결
+                await asyncio.sleep(5)
+                continue
 
     except Exception as e:
         await websocket.send_json({"error": str(e)})
 
 async def broadcast_message(message: dict):
     # 모든 클라이언트에게 메시지 전송
-    for client in clients:
+    for client in connected_clients:
         try:
             await client.send_json(message)
         except:
-            clients.remove(client) 
+            connected_clients.remove(client) 
