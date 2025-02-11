@@ -2,4 +2,5 @@ fastapi
 uvicorn
 websockets
 certifi
-python-multipart 
+python-multipart
+requests 
