@@ -3,42 +3,258 @@
 <head>
     <title>실시간 채팅</title>
     <style>
-        #chat-box {
-            height: 500px;
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        .button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .start-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .stop-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        .stats-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stream-info {
+            margin-bottom: 20px;
+        }
+        .viewer-stats, .donation-stats {
+            margin-bottom: 15px;
+        }
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        .chat-container {
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+            gap: 20px;
+            height: 800px;
+        }
+        .chat-box, .donation-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             overflow-y: auto;
-            border: 1px solid #ccc;
-            padding: 10px;
+        }
+        .chat-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid #eee;
+        }
+        .chat-message {
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .donation {
+            background-color: #fff3e0;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
         }
     </style>
 </head>
 <body>
-    <input type="text" id="bj-id" placeholder="BJ 아이디">
-    <button onclick="startChat()">시작</button>
-    <div id="chat-box"></div>
+    <div class="container">
+        <div class="stats-panel">
+            <div class="controls">
+                <input type="text" id="bj-id" placeholder="BJ 아이디">
+                <button class="button start-btn" onclick="startChat()">시작</button>
+                <button class="button stop-btn" onclick="stopChat()">정지</button>
+            </div>
+            
+            <div class="stream-info">
+                <h3>방송 정보</h3>
+                <div class="stat-item">
+                    <span>제목:</span>
+                    <span id="stream-title">-</span>
+                </div>
+                <div class="stat-item">
+                    <span>BJ:</span>
+                    <span id="bj-name">-</span>
+                </div>
+            </div>
+
+            <div class="viewer-stats">
+                <h3>시청자 통계</h3>
+                <div class="stat-item">
+                    <span>현재 시청자:</span>
+                    <span id="current-viewers">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>최고 시청자:</span>
+                    <span id="peak-viewers">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>평균 시청자:</span>
+                    <span id="avg-viewers">0</span>
+                </div>
+            </div>
+
+            <div class="donation-stats">
+                <h3>후원 통계</h3>
+                <div class="stat-item">
+                    <span>총 후원 금액:</span>
+                    <span id="total-donations">0원</span>
+                </div>
+                <div class="stat-item">
+                    <span>후원 횟수:</span>
+                    <span id="donation-count">0회</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-container">
+            <div class="chat-box">
+                <div class="chat-title">실시간 채팅</div>
+                <div id="chat-messages"></div>
+            </div>
+            <div class="donation-box">
+                <div class="chat-title">후원 내역</div>
+                <div id="donation-messages"></div>
+            </div>
+        </div>
+    </div>
 
     <script>
         let ws;
+        let isConnected = false;
+        let stats = {
+            currentViewers: 0,
+            peakViewers: 0,
+            totalViewers: 0,
+            viewerCount: 0,
+            totalDonations: 0,
+            donationCount: 0
+        };
 
         function startChat() {
+            if (isConnected) return;
+            
             const bjId = document.getElementById('bj-id').value;
+            if (!bjId) {
+                alert('BJ 아이디를 입력해주세요.');
+                return;
+            }
+
             ws = new WebSocket('wss://soopchat.onrender.com/ws');
             
             ws.onopen = () => {
+                isConnected = true;
                 ws.send(`start:${bjId}`);
+                clearStats();
             };
             
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 if (data.type === 'chat') {
-                    addChat(data);
+                    handleChat(data);
+                } else if (data.type === 'info') {
+                    updateStreamInfo(data.data);
+                } else if (data.type === 'stats') {
+                    updateStats(data.data);
                 }
+            };
+
+            ws.onclose = () => {
+                isConnected = false;
             };
         }
 
-        function addChat(chat) {
-            const chatBox = document.getElementById('chat-box');
-            chatBox.innerHTML += `<p><strong>${chat.nickname}</strong>: ${chat.message}</p>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
+        function stopChat() {
+            if (ws) {
+                ws.close();
+                isConnected = false;
+            }
+        }
+
+        function handleChat(chat) {
+            // 일반 채팅과 후원을 구분하여 처리
+            if (chat.is_donation) {
+                const donationBox = document.getElementById('donation-messages');
+                donationBox.innerHTML += `
+                    <div class="donation">
+                        <strong>${chat.nickname}</strong>: ${chat.message}
+                        <div class="donation-amount">${chat.amount}원</div>
+                    </div>
+                `;
+                donationBox.scrollTop = donationBox.scrollHeight;
+                
+                // 후원 통계 업데이트
+                stats.totalDonations += chat.amount;
+                stats.donationCount++;
+                updateStatsDisplay();
+            } else {
+                const chatBox = document.getElementById('chat-messages');
+                chatBox.innerHTML += `
+                    <div class="chat-message">
+                        <strong>${chat.nickname}</strong>: ${chat.message}
+                    </div>
+                `;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
+        }
+
+        function updateStreamInfo(info) {
+            document.getElementById('stream-title').textContent = info.title;
+            document.getElementById('bj-name').textContent = info.bjid;
+        }
+
+        function updateStats(newStats) {
+            stats.currentViewers = newStats.viewers;
+            if (newStats.viewers > stats.peakViewers) {
+                stats.peakViewers = newStats.viewers;
+            }
+            stats.totalViewers += newStats.viewers;
+            stats.viewerCount++;
+            updateStatsDisplay();
+        }
+
+        function updateStatsDisplay() {
+            document.getElementById('current-viewers').textContent = stats.currentViewers.toLocaleString();
+            document.getElementById('peak-viewers').textContent = stats.peakViewers.toLocaleString();
+            document.getElementById('avg-viewers').textContent = Math.round(stats.totalViewers / stats.viewerCount).toLocaleString();
+            document.getElementById('total-donations').textContent = stats.totalDonations.toLocaleString() + '원';
+            document.getElementById('donation-count').textContent = stats.donationCount.toLocaleString() + '회';
+        }
+
+        function clearStats() {
+            stats = {
+                currentViewers: 0,
+                peakViewers: 0,
+                totalViewers: 0,
+                viewerCount: 0,
+                totalDonations: 0,
+                donationCount: 0
+            };
+            updateStatsDisplay();
         }
     </script>
 </body>
