@@ -5,6 +5,7 @@ import asyncio
 import ssl
 import certifi
 from backend.api import get_player_live
+import websockets
 
 app = FastAPI()
 
@@ -58,8 +59,49 @@ async def start_chat(bid: str, websocket: WebSocket):
             }
         })
 
-        # 채팅 수집 로직...
-        # (이전 코드의 websocket 연결 부분을 여기에 구현)
+        # 웹소켓 연결 및 채팅 수집
+        ssl_context = create_ssl_context()
+        async with websockets.connect(
+            f"wss://{CHDOMAIN}:{CHPT}/Websocket/{BJID}",
+            ssl=ssl_context,
+            subprotocols=['chat']
+        ) as ws:
+            # 최초 연결시 전달하는 패킷
+            CONNECT_PACKET = f'\x1b\t000100000600\x0c\x0c\x0c16\x0c'
+            # 메세지를 내려받기 위해 보내는 패킷
+            JOIN_PACKET = f'\x1b\t0002{len(CHATNO.encode("utf-8"))+6:06}00\x0c{CHATNO}\x0c\x0c\x0c\x0c\x0c'
+            # 주기적으로 핑을 보내서 메세지를 계속 수신하는 패킷
+            PING_PACKET = f'\x1b\t000000000100\x0c'
+
+            await ws.send(CONNECT_PACKET)
+            await asyncio.sleep(2)
+            await ws.send(JOIN_PACKET)
+
+            async def ping():
+                while True:
+                    await asyncio.sleep(60)
+                    await ws.send(PING_PACKET)
+
+            async def receive_messages():
+                while True:
+                    try:
+                        data = await ws.recv()
+                        parts = data.split(b'\x0c')
+                        messages = [part.decode('utf-8') for part in parts]
+                        if len(messages) > 5 and messages[1] not in ['-1', '1'] and '|' not in messages[1]:
+                            user_id, comment, user_nickname = messages[2], messages[1], messages[6]
+                            await websocket.send_json({
+                                "type": "chat",
+                                "nickname": user_nickname,
+                                "message": comment
+                            })
+                    except Exception as e:
+                        print(f"Error processing message: {e}")
+
+            await asyncio.gather(
+                receive_messages(),
+                ping()
+            )
 
     except Exception as e:
         await websocket.send_json({"error": str(e)})
