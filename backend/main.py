@@ -176,9 +176,14 @@ async def start_chat(bid: str, websocket: WebSocket):
         await websocket.send_json({"error": str(e)})
 
 async def broadcast_message(message: dict):
-    # 모든 클라이언트에게 메시지 전송
-    for client in connected_clients:
+    # 리스트로 복사해서 순회하면서 set 수정
+    disconnected_clients = set()
+    
+    for client in list(connected_clients):  # set을 리스트로 변환하여 순회
         try:
             await client.send_json(message)
         except:
-            connected_clients.remove(client) 
+            disconnected_clients.add(client)
+    
+    # 연결이 끊긴 클라이언트들 제거
+    connected_clients.difference_update(disconnected_clients) 
